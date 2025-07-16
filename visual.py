@@ -1,146 +1,173 @@
+
 import streamlit as st
 import pandas as pd
 import joblib
-predictors = ['home_team_code', 'away_team_code', 'hour', 'day_code', 
-              'Ball_possession_home', 
-              'Total_shots_home', 'Total_shots_away',
-              'Goalkeeper_saves_home', 'Goalkeeper_saves_away', 
-              'Corner_kicks_home', 'Corner_kicks_away',
-              'Passes_home', 'Passes_away',
-              'Free_kicks_home', 'Free_kicks_away'] 
 
-# Load model and team categories
+ROLLING_WINDOW = 7
+
+home_stats = [
+    'Ball_possession_home', 'Total_shots_home', 'Goalkeeper_saves_home',
+    'Corner_kicks_home', 'Passes_home', 'Free_kicks_home'
+]
+away_stats = [
+    'Ball_possession_away', 'Total_shots_away', 'Goalkeeper_saves_away',
+    'Corner_kicks_away', 'Passes_away', 'Free_kicks_away'
+]
+
+# Predictors used by the model (rolling ones + manually inputted)
+rolling_features = [
+    'home_Ball_possession_home_rolling_7', 'home_Total_shots_home_rolling_7',
+    'home_Goalkeeper_saves_home_rolling_7', 'home_Corner_kicks_home_rolling_7',
+    'home_Passes_home_rolling_7', 'home_Free_kicks_home_rolling_7',
+    'away_Total_shots_away_rolling_7', 'away_Goalkeeper_saves_away_rolling_7',
+    'away_Corner_kicks_away_rolling_7', 'away_Passes_away_rolling_7',
+    'away_Free_kicks_away_rolling_7'
+]
+
+predictors = ['date', 'home_team', 'away_team', 'home_team_code', 'away_team_code',
+       'hour', 'day_code', 'Ball_possession_home', 'Total_shots_home',
+       'Total_shots_away', 'Goalkeeper_saves_home', 'Goalkeeper_saves_away',
+       'Corner_kicks_home', 'Corner_kicks_away', 'Passes_home', 'Passes_away',
+       'Free_kicks_home', 'Free_kicks_away', 'result',
+       'home_Ball_possession_home_rolling_7',
+       'home_Total_shots_home_rolling_7',
+       'home_Goalkeeper_saves_home_rolling_7',
+       'home_Corner_kicks_home_rolling_7', 'home_Passes_home_rolling_7',
+       'home_Free_kicks_home_rolling_7', 'away_Total_shots_away_rolling_7',
+       'away_Goalkeeper_saves_away_rolling_7',
+       'away_Corner_kicks_away_rolling_7', 'away_Passes_away_rolling_7',
+       'away_Free_kicks_away_rolling_7']
+
+# Load model and data
 model = joblib.load('serie_a_predictor.pkl')
 categories = joblib.load('team_categories.pkl')
-
-# Load dataset for team names
 matches = pd.read_csv('matches_processed.csv')
+
+if 'Ball_possession_away' not in matches.columns:
+    matches['Ball_possession_away'] = 1 - matches['Ball_possession_home']
+
 teams = sorted(set(matches['home_team'].dropna()).union(set(matches['away_team'].dropna())))
 
-# Filter predictors to available columns
-predictors_available = [p for p in predictors if p in matches.columns or p in ['home_team_code', 'away_team_code', 'hour', 'day_code']]
-
-# Function to calculate rolling averages for a team
-def get_team_rolling_averages(team, df, stat_cols, n_matches=5):
+def get_team_rolling_dict(df, team_name, venue, home_stats, away_stats, window=7):
     """
-    Calculate rolling averages for a team over their last n_matches for given stats.
-    Combines home and away stats (e.g., home_team's Ball_possession_home with away_team's Ball_possession_away).
+    Returns a dictionary of rolling average stats for a specific team and venue ('home' or 'away').
+    
+    Parameters:
+        df (pd.DataFrame): Match data with date column
+        team_name (str): Team name (e.g., 'AC Milan')
+        venue (str): 'home' or 'away'
+        home_stats (list): List of home stat column names
+        away_stats (list): List of away stat column names
+        window (int): Rolling window size
+        
+    Returns:
+        dict: { 'home_Total_shots_home_rolling_7': value, ... }
     """
-    team_matches = df[(df['home_team'] == team) | (df['away_team'] == team)].sort_values('date').tail(n_matches)
-    averages = {}
-    for stat in stat_cols:
-        stat_away = stat.replace('_home','_away')
-        if 'home' in stat and stat_away in df.columns:
-            stat_values = pd.concat([
-                team_matches[team_matches['home_team'] == team][stat],
-                team_matches[team_matches['away_team'] == team][stat.replace('_home', '_away')]
-            ])
-        elif 'away' in stat and stat.replace('_away', '_home') in df.columns:
-            stat_values = pd.concat([
-                team_matches[team_matches['away_team'] == team][stat],
-                team_matches[team_matches['home_team'] == team][stat.replace('_away', '_home')]
-            ])
-        else:
-            stat_values = pd.Series([])
-        averages[stat] = stat_values.mean() if len(stat_values) > 0 else 0
-    return averages
+    assert venue in ["home", "away"], "Venue must be 'home' or 'away'."
 
-# Prediction function
-def predict_match(home_team, away_team, match_stats, categories, model, predictors):
+    stat_list = home_stats if venue == 'home' else away_stats
+    rolling_features = {}
+
+    # Filter matches for the team
+    if venue == "home":
+        team_matches = df[df["home_team"] == team_name]
+    else:
+        team_matches = df[df["away_team"] == team_name]
+
+    team_matches = team_matches.sort_values("date")
+
+    for stat in stat_list:
+        colname = f"{venue}_{stat}_rolling_{window}"
+        values = team_matches[stat].rolling(window=window, min_periods=1).mean().shift(1)
+        rolling_features[colname] = values.iloc[-1] if not values.empty else 0.0
+
+    return rolling_features
+
+
+def predict_match(home_team, away_team, user_inputs, categories, model):
     try:
         home_code = categories.index(home_team)
         away_code = categories.index(away_team)
     except ValueError:
         return "Team not found in dataset.", False
-    
-    input_data = pd.DataFrame({
-        'home_team_code': [home_code],
-        'away_team_code': [away_code],
-        'hour': [match_stats.get('hour', 20)],
-        'day_code': [match_stats.get('day_code', 5)],
-        'ball_possession_home': [match_stats.get('ball_possession_home', 0.5)],
-        'ball_possession_away': [match_stats.get('ball_possession_away', 0.5)],
-        'total_shots_home': [match_stats.get('total_shots_home', 12)],
-        'total_shots_away': [match_stats.get('total_shots_away', 10)],
-        'goalkeeper_saves_home': [match_stats.get('goalkeeper_saves_home', 3)],
-        'goalkeeper_saves_away': [match_stats.get('goalkeeper_saves_away', 3)],
-        'corner_kicks_home': [match_stats.get('corner_kicks_home', 5)],
-        'corner_kicks_away': [match_stats.get('corner_kicks_away', 5)],
-        'passes_home': [match_stats.get('passes_home', 0.75)],
-        'passes_away': [match_stats.get('passes_away', 0.75)],
-        'free_kicks_home': [match_stats.get('free_kicks_home', 15)],
-        'free_kicks_away': [match_stats.get('free_kicks_away', 15)]
-    }, columns=predictors)
-    
-    input_data = input_data.fillna(input_data.median(numeric_only=True))
-    prediction = model.predict(input_data)[0]
-    result_mapping = {1: "Home Win", 0: "Draw", -1: "Away Win"}
+
+    input_data = {
+        'home_team_code': home_code,
+        'away_team_code': away_code,
+        'hour': user_inputs['hour'],
+        'day_code': user_inputs['day_code'],
+        'Ball_possession_home': user_inputs['Ball_possession_home'],
+        'Ball_possession_away': user_inputs['Ball_possession_away'],
+        'Total_shots_home': user_inputs['Total_shots_home'],
+        'Total_shots_away': user_inputs['Total_shots_away'],
+        'Goalkeeper_saves_home': user_inputs['Goalkeeper_saves_home'],
+        'Goalkeeper_saves_away': user_inputs['Goalkeeper_saves_away'],
+        'Corner_kicks_home': user_inputs['Corner_kicks_home'],
+        'Corner_kicks_away': user_inputs['Corner_kicks_away'],
+        'Passes_home': user_inputs['Passes_home'],
+        'Passes_away': user_inputs['Passes_away'],
+        'Free_kicks_home': user_inputs['Free_kicks_home'],
+        'Free_kicks_away': user_inputs['Free_kicks_away']
+    }
+
+    rolling_stats_home = get_team_rolling_dict(matches, home_team, 'home', home_stats, away_stats, window=7)
+    rolling_stats_away = get_team_rolling_dict(matches, away_team, 'away', home_stats, away_stats, window=7)
+    for key, value in rolling_stats_home.items():
+        input_data[key] = value
+    for key, value in rolling_stats_away.items():
+        input_data[key] = value
+    del input_data['away_Ball_possession_away_rolling_7']  # Not needed, we have the home one
+    del input_data['Ball_possession_away']  # This is not needed as we have the home one
+
+    input_df = pd.DataFrame([input_data])
+    prediction = model.predict(input_df)[0]
+
+    result_mapping = {1: "Home Win", -1: "Away Win"}
     ac_milan_win = (home_team == 'AC Milan' and prediction == 1) or (away_team == 'AC Milan' and prediction == -1)
     return result_mapping.get(prediction, "Unknown"), ac_milan_win
 
-# Streamlit app
+# --- Streamlit App ---
 st.title("Will AC Milan Win? - Serie A Match Predictor")
-st.header("Predict an AC Milan Match")
 col1, col2 = st.columns(2)
 with col1:
     team_type = st.selectbox("Is AC Milan the Home or Away Team?", ["Home", "Away"])
 with col2:
     if team_type == "Home":
         home_team = "AC Milan"
-        away_team = st.selectbox("Away Team", [t for t in teams if t != "AC Milan"], key="away_team")
+        away_team = st.selectbox("Away Team", [t for t in teams if t != "AC Milan"])
     else:
         away_team = "AC Milan"
-        home_team = st.selectbox("Home Team", [t for t in teams if t != "AC Milan"], key="home_team")
+        home_team = st.selectbox("Home Team", [t for t in teams if t != "AC Milan"])
 
-st.subheader("Match Details")
-st.write("Select the match time and day. Statistics are automatically calculated based on recent team performance (last 5 matches).")
-match_stats = {}
-match_stats['hour'] = st.number_input("Match Hour (24h)", min_value=0, max_value=23, value=20, step=1)
-match_stats['day_code'] = st.selectbox("Day of Week", options=list(range(7)), format_func=lambda x: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][x], index=5)
+st.header("Manually Input Match Stats")
+user_inputs = {}
+user_inputs['hour'] = st.number_input("Match Hour (24h)", 0, 23, 20)
+user_inputs['day_code'] = st.selectbox("Day of Week", range(7), format_func=lambda x: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][x])
 
-# Display rolling averages for transparency
-stat_cols = [p for p in predictors if p not in ['home_team_code', 'away_team_code', 'hour', 'day_code']]
-home_averages = get_team_rolling_averages(home_team, matches, [s for s in stat_cols if 'home' in s])
-away_averages = get_team_rolling_averages(away_team, matches, [s for s in stat_cols if 'away' in s])
-st.write(f"**{home_team} Recent Form (Last 5 Matches):**")
-for stat, value in home_averages.items():
-    display_stat = stat.replace('_home', '').replace('_', ' ').title()
-    st.write(f"{display_stat}: {value:.2f}")
-st.write(f"**{away_team} Recent Form (Last 5 Matches):**")
-for stat, value in away_averages.items():
-    display_stat = stat.replace('_away', '').replace('_', ' ').title()
-    st.write(f"{display_stat}: {value:.2f}")
+numeric_fields = {
+    'Ball_possession_home': 0.5,
+    'Ball_possession_away': 0.5,
+    'Total_shots_home': 12,
+    'Total_shots_away': 10,
+    'Goalkeeper_saves_home': 3,
+    'Goalkeeper_saves_away': 3,
+    'Corner_kicks_home': 5,
+    'Corner_kicks_away': 5,
+    'Passes_home': 0.75,
+    'Passes_away': 0.75,
+    'Free_kicks_home': 15,
+    'Free_kicks_away': 15
+}
+
+for field, default in numeric_fields.items():
+    user_inputs[field] = st.number_input(field.replace("_", " ").title(), value=default)
 
 if st.button("Predict Match"):
-    prediction, ac_milan_win = predict_match(home_team, away_team, match_stats, categories, model, predictors_available)
-    if prediction in ["Home Win", "Away Win"]:
-        st.success(f"Prediction: {prediction}")
-        if ac_milan_win:
-            st.balloons()
-            st.write("🎉 AC Milan is predicted to win! 🎉")
-        else:
-            st.snow()
-            st.write("AC Milan is not predicted to win.")
+    prediction, ac_milan_win = predict_match(home_team, away_team, user_inputs, categories, model)
+    st.success(f"Prediction: {prediction}")
+    if ac_milan_win:
+        st.balloons()
+        st.write("🎉 AC Milan is predicted to win! 🎉")
     else:
-        st.error(prediction)
-
-# Upcoming matches
-st.header("Upcoming AC Milan Matches Predictions")
-st.write("Hypothetical upcoming matches involving AC Milan with predicted outcomes.")
-upcoming_matches = [
-    ('AC Milan', 'Inter', {'hour': 20, 'day_code': 5}),
-    ('Napoli', 'AC Milan', {'hour': 18, 'day_code': 6})
-]
-
-upcoming_data = []
-progress_bar = st.progress(0)
-for i, (home, away, stats) in enumerate(upcoming_matches):
-    prediction, ac_milan_win, _, _ = predict_match(home, away, stats, categories, model, predictors_available, matches)
-    upcoming_data.append({
-        'Home Team': home,
-        'Away Team': away,
-        'Prediction': prediction,
-        'AC Milan Wins?': 'Yes' if ac_milan_win else 'No'
-    })
-    progress_bar.progress((i + 1) / len(upcoming_matches))
-st.table(pd.DataFrame(upcoming_data))
+        st.snow()
+        st.write("AC Milan is not predicted to win.")
