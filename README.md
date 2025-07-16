@@ -11,7 +11,7 @@ The app is built with **Streamlit** and allows users to interactively input matc
 - Includes both manual and auto-predicted stats
 - Model trained using `RandomForestClassifier`
 
-## How to Set It Up
+## How to Set The Project Up
 
 ### 1. Clone the Repository
 
