@@ -3,7 +3,7 @@ I've been a fan of Milan since I was nine years old, and while I take great prid
 
 The app is built with **Streamlit** and allows users to interactively input match details and see live predictions.
 
-## 💡 Features
+## Features
 
 - Predict match outcomes for AC Milan vs. any Serie A opponent
 - Rolling average stats over the last 7 matches
@@ -11,7 +11,7 @@ The app is built with **Streamlit** and allows users to interactively input matc
 - Includes both manual and auto-predicted stats
 - Model trained using `RandomForestClassifier`
 
-## 🖥️ How to Set It Up
+## How to Set It Up
 
 ### 1. Clone the Repository
 
@@ -35,7 +35,7 @@ conda activate Prediction_proj
 pip install -r requirements.txt
 ```
 
-> ⚠️ Make sure you have Python 3.9+ installed.
+> Make sure you have Python 3.9+ installed.
 
 ### Run the App
 
