@@ -1,0 +1,25 @@
+scraper:
+  base_url: "https://www.flashscore.co.uk/football/italy/serie-a-"
+  headless: true
+  timeout: 10
+  max_retries: 3
+  delay_between_requests: 2.0
+  max_matches_per_season: 380
+
+model:
+  random_state: 42
+  test_size: 0.2
+  validation_size: 0.2
+  cv_folds: 5
+  n_estimators: 100
+  max_depth: null
+  min_samples_split: 10
+
+data:
+  data_dir: "data"
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  external_data_dir: "data/external"
+  backup_dir: "data/backup_data"
+  max_missing_percentage: 20.0
+  min_matches_per_season: 300
