@@ -18,7 +18,7 @@ class ScraperConfig:
     delay_between_requests: float = 2.0
     max_matches_per_season: int = 380
     
-    
+
 @dataclass
 class ModelConfig:
     """Configuration for ML models"""
